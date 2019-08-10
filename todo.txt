@@ -1,0 +1,2 @@
+Change preview text to description instead of content
+Fix description for 3 posts that are there currently

@@ -2,7 +2,7 @@
 layout: post
 title: Introducing SharpShot
 date: 2019-07-22 18:00:00 +0100
-description: You’ll find this post in your `_posts` directory. Go ahead and edit it and re-build the site to see your changes. # Add post description (optional)
+description: I'm making a zach-like puzzle game. In this post I explain how it's going and the future plans.
 img: posts/20190722/sharpshot.png # Add image post (optional)
 tags: [SharpShot] # add tag
 youtubeId: rmkditieXoE
