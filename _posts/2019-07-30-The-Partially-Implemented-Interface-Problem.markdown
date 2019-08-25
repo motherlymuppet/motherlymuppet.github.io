@@ -33,9 +33,11 @@ The issues discussed are not limited to any one language, and affect most object
 
 # Partially-Implemented Interfaces: An OOP Anti-Pattern
 
-> A partially-implemented interface is a class which implements an interface but does not support some of its methods, and instead throws runtime exceptions when they are called
+> A Partially-Implemented Interface is a class which implements an interface but does not support some of its methods, and instead throws runtime exceptions when they are called
 
-The code below shows an example of this anti-pattern, implementing the class hierarchy in the image.
+Let's just get stuck in and have a look at an example.
+The code snippet below implements the class hierarchy shown.
+The `SingleUseStream` class is a partially-implemented interface.
 We'll be referring back to this code as we attempt some solutions, so make sure you understand what's going on.
 
 ![Original class ](/assets/img/posts/20190730/bad.svg "Starter class hierarchy")
@@ -76,62 +78,66 @@ function closeIfOpen(stream: Stream) {
 }
 ```
 
-This example code is simplistic compared to what we see in the wild, but examples of this behaviour show up everwhere.
-We define a Stream interface, which defines three methods.
-We provide two implementations, and two static functions which operate on a stream.
-The snippet below always throws an error, but passes the compiler checks without issue.
+This example code is simplistic compared to what we see in the wild, but similar code shows up everwhere.
+We define a Stream interface, which declares three methods.
+It has two implementations, and there are two static functions which accept a stream parameter.
+The `SingleUseStream` class is a partially-implemented interface.
+
+It declares that it implements `Stream`, then does not impelment the `open()` method.
+For example, this snippet will always throw an error, but has no compile-time warnings or errors.
 
 ```typescript
 const stream = new SingleUseStream();
 toggleStream(stream);
 ```
 
-`SingleUseStream` implements `Stream`, meaning that the type checker is happy to pass it to `toggleStream`.
-When `toggleStream` calls `Stream.open()`, it will throw an error.
+## What's Wrong With That?
 
-## Issues Caused
+This anti-pattern is one example of violating the *Liskov Substitution Principle* (LSP), one of the five SOLID principles.
+The principle states that all implementations of an interface should be interchangeable.
+In our case, `SingleUseStream` and `MultiUseStream` are not interchangeable.#
+Violating the LSP results in code that is hard to debug and hard to reason about.
 
-//TODO Liskov Substitution Principle
-
-Using `SingleUseStream` successfully is incredibly difficult.
+Using `SingleUseStream` successfully is very fiddly.
 The programmer needs to understand the implementation of every method that they pass it to.
-If any of the implementations call `Stream.open()`, the code will crash.
-When there are multiple classes that use partially-implemented interfaces, the programmer will learn to not trust the compiler.
-At that point, the codebase will have all the downsides of a statically-typed language (verbose, inflexible code), while also having all the downsides of a dynamically-typed language (more intermittent bugs, less readable).
-Additionally, a new programmer will have constant issues due to trusting the compiler and running into type compatability issues at runtime.
+If any of the implementations call `open()`, the code will crash.
+In fact, if they ever pass a `SingleUseStream` object to a library function, then updating that library could lead to breaking changes.
+The library creators would not think twice about calling `open()` on your object, and they definitely wouldn't report it in the changelog!
 
-This problem is incredibly serious, and can slow development massively.
-You may think that nobody would be stupid enough to write code like this, but it happens frequently.
-As we will see later, there is often no good alternative due to the limitations of the type systems in the language.
+When this anti-pattern is used frequently throughout a codebase, you will learn to not trust the compiler when it says there are no issues.
+This is because you have replaced the compile-time type checks with run-time checks.
+At that point, you have all the boilerplate code and inflexibility of a statically-typed language, while also having the intermittent bugs and worse readability of a dynamically-typed language!
 
-## Why would someone do this?
+At this point, I hope I've sold you on the idea that you should avoid partially-implemented interfaces.
+So why are they so common?
+Do programmers just not know that it's bad?
+Do they not care?
 
-There are two main reasons to partially-implement an interface.
+In fact, there is often no good alternative due to the limitations of the language and the pre-existing code base.
+
+## It's Sometimes Necessary?
+
+Nobody likes writing `throw 'Not Supported'`.
+It feels hacky, and like it will come back to bite you.
+It's not laziness though, it's a lack of other options.
 
 ### Work-In-Progress Code
 
-When the codebase is a work-in-progress, it's important to compile often to check over the code that is written.
-Since an interface is a specification of how a class should behave, they are written first and completely, before any code is written.
-Therefore, when implementing the interface, nothing can be tested until all methods are implemented (at least superficially).
-Programmers get around that by using method stubs, short methods that satisfy the compiler but do not actually implement the required behaviour.
-C# implements this functionality natively, with its `NotYetImplementedException`.
-They often look like this:
-
-```java
-public void doSomething(){
-	// TODO implement this
-	throw new RuntimeException("Not Yet Implemented")
-}
-```
+When creating a new feature, you want to compile often to check that the code is right.
+The interface is a specification for a class, so you want to write it first.
+Now you can't compile, since you haven't implemented the entire interface!
+There's only two options, you can implement everything and then compile, or you can just create method stubs that throw an error when called.
+Of course, you do the latter, and honestly I agree with that!
 
 This is probably the least harmful use of a partially-implemented interface.
 It is temporary, and the programmer already understands the codebase, so will know when the method gets called.
-However, in classic `TODO` fashion, this will never actually be implemented.
-Then, this code gets published as part of an external API, and used by people who get annoyed that it randomly throws exceptions.
+However, in classic `TODO` fashion, some will never actually be implemented.
+Years later, a new programmer looks at the interface, reads the docs, and calls a method that isn't actually implemented.
+Even worse, just one branch of an `if` statement was forgotten about, and the code works most of the time, and throws an error on an obscure edge case that wasn't tested.
 
 ### Attempting to provide a 'sane' default
 
-In java, `AbstractList` throws an `UnsupportedOperationException` whenever you call any of the following methods:
+In java, `AbstractList` throws an `UnsupportedOperationException` whenever you call any of:
 
 * `set`
 * `add`
@@ -139,105 +145,57 @@ In java, `AbstractList` throws an `UnsupportedOperationException` whenever you c
 
 I can only assume that this is to make it less intimidating to extend `AbstractList`.
 When doing so, the only method that you must implement is `get`.
-These default 'implementations' (sarcastic air quotes) mean that the class will compile with just that implementation.
+These default 'implementations' (sarcastic air quotes) allow it to compile with just that.
 
-However, this should not be encouraged.
+Frankly, this is horrendous.
 Any programmer implementing AbstractList will assume that the methods with default implementations are actually useful.
 There is no reason, until it starts throwing exceptions, to look at the `AbstractList` source.
 
 ### Overly Broad Interfaces
 
-In external APIs, this is the more common scenario.
-When writing the interface, the developer decided 'Everything should be able to do *x*', and that turned out to be completely unnecessary.
-By the time people realised it was unnecessary, it was too late.
+This is the broadest, and most common scenario.
+Sadly, it's also the hardest to fix.
 
-Java's `ConcurrentHashMap.Node` implements `Map.Entry`.
-That means it is forced to implement `setValue`, which could lead to race conditions when used concurrently.
-To avoid this, it does not implement the method and instead throws an `UnsupportedOperationException`.
+If an interface is too broad, it is usually because the original developer did not consider a use case where an implementation would not need one of the methods.
+This means that the interface declares a method which future implementations do not, or cannot implement.
+By the time anyone realises that the interface is too broad for their use case, it is entrenched.
+Let's consider a real-life example.
 
-The `Map.Entry` interface is too broad, they did not consider that some entries may be read-only.
-Of course, this could be solved by providing a more precise inheritance hierarchy.
-We could separate maps into read-only and read-write maps.
+Java's `ConcurrentHashMap.Node` implements `Map.Entry`, which declares `setValue`.
+To compile, it must implement the method, but allowing values to be changed would result in race conditions when used concurrently.
+The developers had three choices:
+
+* Implement the method and accept that it won't work sometimes
+* Don't implement the method, and don't inherit from `Map.Entry`
+* Use a method stub that throws an error
+
+The first solution is clearly awful, as it would produce obscure and intermittent bugs caused by race conditions.
+The second option really isn't much better.
+All throughout java, functions take `Map.Entry` as a parameter.
+Creating a data structure in the standard library that was incompatible with the rest of the collections API would be a disaster, and you'd end up rewriting the whole API.
+We can easily rule out that option too.
+That leaves the final option, to create method stubs which throw an error.
+Again, I agree that this is the best option!
+
+What makes this an anti-pattern is that it seems like the best option at the time.
+It's only later on that you realise the damage it caused.
+Like when you accept a `Map` as a parameter and call `setValue` on one of the nodes, only to realise that code elsewhere has changed and your parameter is now a `ConcurrentHashMap` and your code throws errors.
+
+`Map.Entry` is an Overly Broad Interface as they did not consider that some entries may be read-only.
+This *could* be solved by providing a more precise inheritance hierarchy - we could separate maps into read-only and read-write maps.
 Kotlin, another JVM language, does that in its standard library:
 
 ![Kotlin Map and MutableMap class hierarchy](/assets/img/posts/20190730/map.svg "Kotlin Map and MutableMap class hierarchy")
 
-If we consider it in more depth, the problem of overly broad interfaces becomes more apparent.
-We don't just care about times where an external API has a method stub that throws an interface.
-Every time a function takes a parameter and doesn't use every single method provided by that type, it is an overly broad interface.
-Consider the following code:
+# A Way Forwards
 
-```java
-public static Integer first(List<Integer> list){
-	return list.get(0);
-}
-```
-
-The `List` interface is overly broad here.
-The only method used is `get`, but if we wanted to use this method with a custom class, we need to implement every method defined on `List`.
-That's 29 methods!
-It's quite tempting to just implement `get` and add method stubs for the other 28.
-Overly broad interfaces like this encourage programmers to partially-implement interfaces!
-
-### Because of bad programmers?
-
-You're probably thinking that all of these issues are caused by bad design choices.
-You're right about that, and you're right that by thinking about the architecture more, there's never a need for a partially-implemented interface.
-However, that doesn't mean that the programmer who does it is bad.
-We make design tradeoffs constantly, and can't expect the programmer to know the future.
-
-So if partially-implemented interfaces can be avoided by being more careful, why would we design a language to avoid it?
-Frankly, most language design decisions revolve around encouraging best practices without having to think as much.
-This is the case with partially-implemented interfaces too.
-We *could* just explain how to avoid it, or we could design our languages to make it unnecessary.
-
-
-# What are interfaces for?
-
-At the core, interfaces allow us to make *more readable* code.
-That's a strange suggestion, since interfaces are an architectural, machine-oriented concept.
-To suggest that their main benefit is human-oriented is jarring!
-However, the main benefits of interfaces come from *hiding information*, and *explicit similarity*.
-
-* They provide a specification so that *when reading* the code, you can deal with that specification and not an implementation.
-* They make similar behaviour between classes explicit, to encourage consistent architectural styles.
-* They allow similar classes to be handled identically
-
-# A Solution?
-
-Wouldn't it be much better if we could just specify everywhere which methods we support?
-
-Currently, an interface is a protocol consisting of multiple methods.
-What if we instead say that each interface should only be for one method?
-
-This works great, like we saw earlier with `Closeable`.
-It's immediately obvious that any `Closeable` parameter is given that type because we need the `close()` method.
-
-This is a fundamental shift in how we view types.
-Instead of saying *x should be y*, we say *x should do a and b and c*.
-This is known as *Structural Typing*.
-
-This approach to Structural Typing is rare because it is *method-based*, rather than *field-based*.
-Most structural typing only allows you to specify an object in terms of its fields, not its methods.
-Additionally, we don't actually need to specify what methods we are implementing because we can infer it.
-
-Mention **OCaml**
-
-I call this type system *Methodical Typing*.
-Really, it's *Static Inferred Method-Based Structural Typing*.
-But that's just not as catchy.
-
-## Methodical Typing
-Let's have a look at methodical typing, and how we get there through incremental improvement of the above example.
-
-### Java
-
-Most developers would immediately see the solution to the above example's runtime type-checking.
-We need to divide the large `Stream` interface into multiple smaller interfaces.
+Our first code snippet had serious issues, but a lot of you already have ideas about how to fix it.
+Like we saw with Kotlin's immutable map, let's rework our inheritance hierarchy to make it more precise.
+To do that, we split our large `Stream` interface into two smaller interfaces, like this:
 
 ![The Stream interface has been split into Stream and ReopenableStream](/assets/img/posts/20190730/java.svg "The updated class hierarchy")
 
-If we implement the class hierarchy shown above, you'd get something like this:
+Which translates to the following code snippet:
 
 ```typescript
 interface Stream{
@@ -275,12 +233,74 @@ function closeIfOpen(stream: Stream) {
 }
 ```
 
+Now when we try the code that threw an error before, the compiler throws an error since `toggleStream` does not accept a parameter of type `Stream`.
+
+```typescript
+const stream = new SingleUseStream();
+toggleStream(stream);
+```
+
+Problem solved, smaller interfaces are the way forwards and all interfaces should be tiny!
+
+## All Interfaces Should be Tiny?
+
+That's an interesting proposal.
+What happens if we do make all our interfaces tiny?
+Currently, an interface is a specification declaring multiple required methods.
+What would happen if we limited ourselves to interfaces that only declared one method?
+If we did that, how is declaring a that a class implements an interface any different to declaring that a class implements a method?
+
+The obvious difference is that when using single-method interfaces, multiple classes can declare that they implement the same method.
+We end up in a situation where each class and function just declares which methods they support.
+
+This is a fundamental shift in how we view types.
+Instead of saying *x should **be** y*, we say *x should **do** a and b and c*.
+This is known as *Structural* typing, as opposed to *Nominal* typing.
+
+We know that an object can be passed to a function because the types are compatible.
+With nominal typing, we know that because we check the declared type of the object and the delcared type of the function.
+If they are the same type, or if the object is a sub-type of the function parameter type, they are compatible and the call is allowed.
+
+Comparatively, with structural typing, we instead check that every property on the function parameter type is also present on the object.
+This probably sounds familiar to you, even if you don't have a name for it.
+Javascript, and many other interpreted languages work like this.
+In javascript, when we call a function on an object, the interpreter looks at the object's prototype and finds the function if it exists.
+It does not care what the actual type of the object is.
+
+*duck typing goes here* //TODO
+
+With some nominally-typed languages, we can pretend that they are structurally typed.
+In fact, I think that this in-between may have benefits over both purely nominal and purely structural type systems.
+
+## Pretending To Be Structural
+
+
+
+This approach to Structural Typing is rare because it is *method-based*, rather than *field-based*.
+Most structural typing only allows you to specify an object in terms of its fields, not its methods.
+Additionally, we don't actually need to specify what methods we are implementing because we can infer it.
+
+I call this type system *Methodical Typing*.
+Really, it's *Static Inferred Method-Based Structural Typing*.
+But that's just not as catchy.
+
+## Methodical Typing
+Let's have a look at methodical typing, and how we get there through incremental improvement of the above example.
+
+### Java
+
+Most developers would immediately see the solution to the above example's runtime type-checking.
+We need to divide the large `Stream` interface into multiple smaller interfaces.
+
+
+
+If we implement the class hierarchy shown above, you'd get something like this:
+
+
+
 Now, if we try the code that caused us issues, it gets picked up immediately by the type checker:
 
-```java
-SingleUseStream stream = new SingleUseStream();
-StreamUtil.toggleStream(stream);
-```
+
 
 `togleStream(ReopenableStream) cannot be applied to (SingleUseStream)`
 
@@ -398,6 +418,23 @@ Now, we only need to define one interface per method.
 The combination interfaces can be defined on-demand as intersect types, as seen in `streamUtil`.
 
 ### Designing a methodically-typed language from the ground-up
+
+If we consider it in more depth, the problem of overly broad interfaces becomes more apparent.
+We don't just care about times where an external API has a method stub that throws an interface.
+Every time a function takes a parameter and doesn't use every single method provided by that type, it is an overly broad interface.
+Consider the following code:
+
+```java
+public static Integer first(List<Integer> list){
+	return list.get(0);
+}
+```
+
+The `List` interface is overly broad here.
+The only method used is `get`, but if we wanted to use this method with a custom class, we need to implement every method defined on `List`.
+That's 29 methods!
+It's quite tempting to just implement `get` and add method stubs for the other 28.
+Overly broad interfaces like this encourage programmers to partially-implement interfaces!
 
 If we started from scratch, creating a language with a methodical type system, what would it look like?
 My favourite language design so far looks like this:
