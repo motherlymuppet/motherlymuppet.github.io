@@ -2,86 +2,96 @@
 layout: post
 title: The Partially-Implemented Interface Problem
 date: 2019-07-30 18:00:00 +0100
-description: What's wrong with a partially-implemented interface, and how could we it better?
+description: The product of a year's obsession, we explore a minor issue with programming languages and redesign everything to fix it.
 img: posts/20190739/sharpshot.png
-tags: [Green-Field Thinking]
+tags: [Methodical Typing]
 ---
 
-I originally had the idea for this article around a year ago.
-An awful lot of thought went into it, as it's really not based on much other work.
-A lot of what I discussed here is stuff that I have discovered and reasoned through from scratch.
-I'm not saying nobody has discussed this before, but I have built it up from scratch.
+# Preface
 
-# What are interfaces for?
+I originally had the idea for this article over a year ago.
+At the time, I was struggling with constant `NotImplementedException` in Java's JavaFX GUI library.
+I knew there had to be a better way, and have been thinking about how to solve the problem ever since.
+The problem is real, but the solution is overkill.
+Enjoy the journey, and enjoy thinking about language design in more detail than you have before - I certainly have.
 
-At the core, interfaces allow us to make *more readable* code.
-That's a strange suggestion, since interfaces are an architectural, machine-oriented concept.
-To suggest that their main benefit is human-oriented is jarring!
-However, the main benefits of interfaces come from *hiding information*, and *explicit similarity*.
+# Introduction
 
-* They provide a specification so that *when reading* the code, you can deal with that specification and not an implementation.
-* They make similar behaviour between classes explicit, to encourage consistent architectural styles.
-* They allow similar classes to be handled identically
+It's a long one, so buckle in.
+I think it's all interest, but each section can be read independently, so feel free to skip bits if it's too slow or not interesting.
+I'll include a recap so far at the top of each section, so you can just read the bits you're interested in.
 
-# Partially-Implemented Interfaces
+This article will introduce a common object-oriented programming anti-pattern, 'Partially-Implemented Interfaces'.
+We'll discuss what causes it, the problems that occur as a result.
+Then, we'll think about preventing it, first through the use of better patterns, before designing a programming language and type system to encourage the use of those patterns.
+We'll write a basic transpiler, and try it out on a project, thinking about where our design went right and what went wrong.
+Finally, we'll reflect on the difficulties and compromises required with programming language design.
 
-> A partially-implemented interface is an interface where the concrete implementation does not implement all the methods defined.
-> Typically, method stubs which throw runtime exceptions are used.
+All code snippets in the article are typescript.
+Of the languages that would support what we want to do, it was the most widely used and known.
+The issues discussed are not limited to any one language, and affect most object-oriented programming languages.
 
-The code below shows an example of a partially-implemented interface, based on the class hierarchy in the image.
-Make sure you read and understand the code properly, as we will refer back to it as we explore improvements.
-The rest of the article will be based around this code example.
+# Partially-Implemented Interfaces: An OOP Anti-Pattern
 
-![Original class hierarchy](/assets/img/posts/20190730/bad.svg "Starter class hierarchy")
+> A partially-implemented interface is a class which implements an interface but does not support some of its methods, and instead throws runtime exceptions when they are called
 
-```java
+The code below shows an example of this anti-pattern, implementing the class hierarchy in the image.
+We'll be referring back to this code as we attempt some solutions, so make sure you understand what's going on.
+
+![Original class ](/assets/img/posts/20190730/bad.svg "Starter class hierarchy")
+
+```typescript
 interface Stream {
-    void open();
-    void close();
-    boolean isOpen();
+    isOpen(): boolean;
+    close(): void;
+    open(): void;
 }
 
 class SingleUseStream implements Stream {
-    private boolean currentlyOpen = true;
-    // The next line is the important one!
-    public void open() { throw new UnsupportedOperationException(); }
-    public void close() { currentlyOpen = false; }
-    public boolean isOpen() { return currentlyOpen; }
+    private currentlyOpen: boolean = true;
+    isOpen = () => this.currentlyOpen;
+    close = () => this.currentlyOpen = false;
+    open = () => {
+        throw "Unsupported Operation"
+    }
 }
 
 class MultiUseStream implements Stream {
-    private boolean currentlyOpen = true;
-    public void open() { currentlyOpen = true; }
-    public void close() { currentlyOpen = false; }
-    public boolean isOpen() { return currentlyOpen; }
+    private currentlyOpen: boolean = true;
+    isOpen = () => this.currentlyOpen;
+    close = () => this.currentlyOpen = false;
+    open = () => this.currentlyOpen = true;
 }
 
-class StreamUtil {
-    public static void toggleStream(Stream stream) {
-        if (stream.isOpen()) {
-            stream.close();
-        } else {
-            stream.open();
-        }
-    }
+function toggleStream(stream: Stream) {
+    stream.isOpen() ?
+        stream.close() :
+        stream.open()
+}
 
-    public static void closeIfOpen(Stream stream){
-        if(stream.isOpen()){
-            stream.close();
-        }
+function closeIfOpen(stream: Stream) {
+    if (stream.isOpen()) {
+        stream.close()
     }
 }
 ```
 
-That snippet is very simple, and the issue is immediately clear.
-The code below will always throw an exception but compiles without any errors or warnings.
+This example code is simplistic compared to what we see in the wild, but examples of this behaviour show up everwhere.
+We define a Stream interface, which defines three methods.
+We provide two implementations, and two static functions which operate on a stream.
+The snippet below always throws an error, but passes the compiler checks without issue.
+
+```typescript
+const stream = new SingleUseStream();
+toggleStream(stream);
+```
+
 `SingleUseStream` implements `Stream`, meaning that the type checker is happy to pass it to `toggleStream`.
-When `toggleStream` calls `Stream.open()`, it will throw an exception.
+When `toggleStream` calls `Stream.open()`, it will throw an error.
 
-```java
-SingleUseStream stream = new SingleUseStream();
-StreamUtil.toggleStream(stream);
-```
+## Issues Caused
+
+//TODO Liskov Substitution Principle
 
 Using `SingleUseStream` successfully is incredibly difficult.
 The programmer needs to understand the implementation of every method that they pass it to.
@@ -93,8 +103,6 @@ Additionally, a new programmer will have constant issues due to trusting the com
 This problem is incredibly serious, and can slow development massively.
 You may think that nobody would be stupid enough to write code like this, but it happens frequently.
 As we will see later, there is often no good alternative due to the limitations of the type systems in the language.
-
-
 
 ## Why would someone do this?
 
@@ -183,6 +191,18 @@ Frankly, most language design decisions revolve around encouraging best practice
 This is the case with partially-implemented interfaces too.
 We *could* just explain how to avoid it, or we could design our languages to make it unnecessary.
 
+
+# What are interfaces for?
+
+At the core, interfaces allow us to make *more readable* code.
+That's a strange suggestion, since interfaces are an architectural, machine-oriented concept.
+To suggest that their main benefit is human-oriented is jarring!
+However, the main benefits of interfaces come from *hiding information*, and *explicit similarity*.
+
+* They provide a specification so that *when reading* the code, you can deal with that specification and not an implementation.
+* They make similar behaviour between classes explicit, to encourage consistent architectural styles.
+* They allow similar classes to be handled identically
+
 # A Solution?
 
 Wouldn't it be much better if we could just specify everywhere which methods we support?
@@ -219,40 +239,38 @@ We need to divide the large `Stream` interface into multiple smaller interfaces.
 
 If we implement the class hierarchy shown above, you'd get something like this:
 
-```java
-interface Openable{ void open(); }
-interface Closeable { void close(); }
-interface OpenCheckable { boolean isOpen(); }
+```typescript
+interface Stream{
+    isOpen(): boolean;
+    close(): void;
+}
 
-interface Stream extends Closeable, OpenCheckable{}
-interface ReopenableStream extends Stream, Openable{}
+interface ReusableStream extends Stream{
+    open(): void
+}
 
 class SingleUseStream implements Stream {
-    private boolean currentlyOpen = true;
-    public void close() { currentlyOpen = false; }
-    public boolean isOpen() { return currentlyOpen; }
+    private currentlyOpen: boolean = true;
+    isOpen = () => this.currentlyOpen;
+    close = () => this.currentlyOpen = false;
 }
 
-class MultiUseStream implements ReopenableStream {
-    private boolean currentlyOpen = true;
-    public void open() { currentlyOpen = true; }
-    public void close() { currentlyOpen = false; }
-    public boolean isOpen() { return currentlyOpen; }
+class MultiUseStream implements ReusableStream {
+    private currentlyOpen: boolean = true;
+    isOpen = () => this.currentlyOpen;
+    close = () => this.currentlyOpen = false;
+    open = () => this.currentlyOpen = true;
 }
 
-class StreamUtil {
-    public static void toggleStream(ReopenableStream stream) {
-        if (stream.isOpen()) {
-            stream.close();
-        } else {
-            stream.open();
-        }
-    }
+function toggleStream(stream: ReusableStream) {
+    stream.isOpen() ?
+        stream.close() :
+        stream.open()
+}
 
-    public static void closeIfOpen(Stream stream){
-        if(stream.isOpen()){
-            stream.close();
-        }
+function closeIfOpen(stream: Stream) {
+    if(stream.isOpen()){
+        stream.close()
     }
 }
 ```
@@ -283,11 +301,11 @@ Whenever a class implements a combination type, it also needs to implement all c
 An example is necessary.
 Here is what it looks like with four methods and an exhaustative list of combination types:
 
-```java
-interface A{void a();}
-interface B{void b();}
-interface C{void c();}
-interface D{void d();}
+```typescript
+interface A{a(): void}
+interface B{b(): void}
+interface C{c(): void}
+interface D{d(): void}
 
 interface AB extends A,B{}
 interface AC extends A,C{}
@@ -303,7 +321,11 @@ interface BCD extends B,C,D{}
 
 interface ABCD extends A,B,C,D{}
 
-class ABCDImpl implements ABCD, ABC, ABD, ACD, BCD, AB, AC, AD, BC, BD, CD{ ... }
+class ABCDImpl implements
+    A,B,C,D,
+    AB,AC,AD,BC,BD,CD,
+    ABC,ABD,ACD,BCD,
+    ABCD{/* ... */}
 ```
 
 ![Comprehensive class hierarchy for 4 methods](/assets/img/posts/20190730/extreme.svg "Class hierarchy with 4 methods")
@@ -341,37 +363,33 @@ One language supporting Union and Intersect types is 'Ceylon'.
 
 Here is an example of the above program rewritten in Ceylon:
 
-```ceylon
-interface Openable{ shared formal void open(); }
-interface Closeable { shared formal void close(); }
-interface OpenCheckable { shared formal Boolean isOpen(); }
+```typescript
+interface M_isOpen{ isOpen(): boolean }
+interface M_close{ close(): void }
+interface M_open{ open(): void }
 
-class SingleUseStream() satisfies Closeable & OpenCheckable {
-    variable Boolean currentlyOpen = true;
-    shared actual void close() { currentlyOpen = false; }
-    shared actual Boolean isOpen() { return currentlyOpen; }
+class SingleUseStream implements M_isOpen, M_close{
+    private currentlyOpen: boolean = true;
+    isOpen = () => this.currentlyOpen;
+    close = () => this.currentlyOpen = false;
 }
 
-class MultiUseStream() satisfies Closeable & Openable & OpenCheckable {
-    variable Boolean currentlyOpen = true;
-    shared actual Boolean isOpen() { return currentlyOpen; }
-    shared actual void close() { currentlyOpen = false; }
-    shared actual void open() { currentlyOpen = true; }
+class MultiUseStream implements M_isOpen, M_close, M_open {
+    private currentlyOpen: boolean = true;
+    isOpen = () => this.currentlyOpen;
+    close = () => this.currentlyOpen = false;
+    open = () => this.currentlyOpen = true;
 }
 
-object streamUtil {
-    shared void toggleStream(Closeable & Openable & OpenCheckable stream) {
-        if (stream.isOpen()) {
-            stream.close();
-        } else {
-            stream.open();
-        }
-    }
+function toggleStream(stream: M_isOpen & M_open & M_close) {
+    stream.isOpen() ?
+        stream.close() :
+        stream.open()
+}
 
-    shared void closeIfOpen(Closeable & OpenCheckable stream){
-        if(stream.isOpen()){
-            stream.close();
-        }
+function closeIfOpen(stream: M_isOpen & M_close) {
+    if(stream.isOpen()){
+        stream.close()
     }
 }
 ```
@@ -384,41 +402,34 @@ The combination interfaces can be defined on-demand as intersect types, as seen 
 If we started from scratch, creating a language with a methodical type system, what would it look like?
 My favourite language design so far looks like this:
 
-```java
-method open()
-method close()
-method isOpen(): Boolean
+```typescript
+method isOpen(): boolean;
+method close(): void;
+method open(): void;
 
 class SingleUseStream {
-    private var currentlyOpen = true
-    method close() { currentlyOpen = false }
-    method isOpen() { return currentlyOpen }
+	private currentlyOpen: boolean = true;
+	isOpen = () => this.currentlyOpen;
+	close = () => this.currentlyOpen = false;
 }
 
 class MultiUseStream {
-    private var currentlyOpen = true
-    method open() { currentlyOpen = true }
-    method close() { currentlyOpen = false }
-    method isOpen() { return currentlyOpen }
+	private currentlyOpen: boolean = true;
+	isOpen = () => this.currentlyOpen;
+	close = () => this.currentlyOpen = false;
+	open = () => this.currentlyOpen = true;
 }
 
-method toggleStream(stream: [Open, Close, IsOpen])
-method closeIfOpen(stream: [Close, IsOpen])
+function toggleStream(stream: <isOpen, close, open>) {
+	stream.isOpen() ?
+		stream.close() :
+		stream.open()
+}
 
-object StreamUtil {
-    method toggleStream(stream) {
-        if (stream.isOpen()) {
-            stream.close()
-        } else {
-            stream.open()
-        }
-    }
-
-    method closeIfOpen(stream) {
-        if (stream.isOpen()) {
-            stream.close()
-        }
-    }
+function closeIfOpen(stream: <isOpen, close>) {
+	if(stream.isOpen()){
+		stream.close()
+	}
 }
 ```
 
