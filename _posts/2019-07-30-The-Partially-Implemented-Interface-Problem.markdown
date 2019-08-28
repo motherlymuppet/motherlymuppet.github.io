@@ -31,7 +31,7 @@ All code snippets in the article are typescript.
 Of the languages that would support what we want to do, it was the most widely used and known.
 The issues discussed are not limited to any one language, and affect most object-oriented programming languages.
 
-# Partially-Implemented Interfaces: An OOP Anti-Pattern
+# Partially-Implemented Interfaces
 
 > A Partially-Implemented Interface is a class which implements an interface but does not support some of its methods, and instead throws runtime exceptions when they are called
 
@@ -95,7 +95,7 @@ toggleStream(stream);
 
 This anti-pattern is one example of violating the *Liskov Substitution Principle* (LSP), one of the five SOLID principles.
 The principle states that all implementations of an interface should be interchangeable.
-In our case, `SingleUseStream` and `MultiUseStream` are not interchangeable.#
+In our case, `SingleUseStream` and `MultiUseStream` are not interchangeable.
 Violating the LSP results in code that is hard to debug and hard to reason about.
 
 Using `SingleUseStream` successfully is very fiddly.
@@ -244,16 +244,15 @@ Problem solved, smaller interfaces are the way forwards and all interfaces shoul
 
 ## All Interfaces Should be Tiny?
 
-That's an interesting proposal.
+It's an interesting proposal.
 What happens if we do make all our interfaces tiny?
-Currently, an interface is a specification declaring multiple required methods.
-What would happen if we limited ourselves to interfaces that only declared one method?
-If we did that, how is declaring a that a class implements an interface any different to declaring that a class implements a method?
+Currently, we use interfaces as specifications which declare multiple required functions.
+What would happen if we limited ourselves to interfaces that only declared one function?
+If we did, is there any difference between a class which implementing an interface and a function?
 
-The obvious difference is that when using single-method interfaces, multiple classes can declare that they implement the same method.
-We end up in a situation where each class and function just declares which methods they support.
-
-This is a fundamental shift in how we view types.
+The obvious difference is that we can use interfaces as types.
+When specifying the parmater list of a function, we can require that a parameter implements an interface, but can't directly require that it provides a (set of) function(s).
+If we could do that, it would mean a fundamental shift in how we use types in our code.
 Instead of saying *x should **be** y*, we say *x should **do** a and b and c*.
 This is known as *Structural* typing, as opposed to *Nominal* typing.
 
@@ -266,13 +265,81 @@ This probably sounds familiar to you, even if you don't have a name for it.
 Javascript, and many other interpreted languages work like this.
 In javascript, when we call a function on an object, the interpreter looks at the object's prototype and finds the function if it exists.
 It does not care what the actual type of the object is.
+In dynamically-typed languages like Javascript, structural typing is known as *duck typing*[duck].
 
-*duck typing goes here* //TODO
+[^duck] The name of duck typing comes from the saying "if it looks like a duck, walks like a duck, and quacks like a duck, it's probably a duck". (Which I think is great)
 
-With some nominally-typed languages, we can pretend that they are structurally typed.
+With some nominally-typed languages, we can bodge it to pretend that they are structurally typed.
 In fact, I think that this in-between may have benefits over both purely nominal and purely structural type systems.
 
 ## Pretending To Be Structural
+
+Let's go back to our Stream example, and try pretending that we have structural typing.
+For those of you more experienced in typescript, you'll recognise that this code is far from ideal, but bear with us.
+It will get better.
+
+```typescript
+interface canCheckIfOpen{
+	isOpen(): boolean;
+}
+
+interface closable{
+	close(): void;
+}
+
+interface openable{
+	open(): void;
+}
+
+interface SingleUseStream extends closable, canCheckIfOpen { }
+interface ReusableStream extends closable, openable, canCheckIfOpen { }
+
+class SingleUseStream implements Stream {
+    private currentlyOpen: boolean = true;
+    isOpen = () => this.currentlyOpen;
+    close = () => this.currentlyOpen = false;
+}
+
+class MultiUseStream implements ReusableStream {
+    private currentlyOpen: boolean = true;
+    isOpen = () => this.currentlyOpen;
+    close = () => this.currentlyOpen = false;
+    open = () => this.currentlyOpen = true;
+}
+
+function toggleStream(stream: ReusableStream) {
+    stream.isOpen() ?
+        stream.close() :
+        stream.open()
+}
+
+function closeIfOpen(stream: SingleUseStream) {
+    if(stream.isOpen()){
+        stream.close()
+    }
+}
+```
+
+Here, we have defined one interface for each function, like we discussed earlier.
+We have created interfaces which implement our single function interfaces, which get used as parameter types.
+They are necessary since we can't have a parameter which is multiple types[multipleTypes]
+
+[^multipleTypes] Yes, I know we can use intersect types. I was getting to that!
+
+Now, we can use any combination of functions as a type!
+Let's imagine we want to create a new function, and it should require one parameter `x`.
+On `x`, we call the functions `isOpen` and `open`.
+We can create a new interface which extends both `canCheckIfOpen` and `openable`, then use that interface as the type of `x`.
+
+Then, we can pass `MultiUseStream` but not `SingleUseStream` to the function.
+Later, if we create a new class that extends `canCheckIfOpen` and `openable`, but not `closable`, then we can pass that class too!
+With the older versions of our code example, we would be forced to make the type of `x` `ReusableStream`, meaning any object passed to the function would need to implement all three functions.
+
+Is that it?
+Have we solved the problem forever?
+...You can probably see the pattern here.
+
+## 16 Interfaces Is Enough - Right?
 
 
 
